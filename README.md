@@ -100,8 +100,8 @@ Extend Task 1 to AFHQ image dataset.
 - Loss functions & predictors (**model.py**)  
 
 **Experiments:**
-- Train with different beta **schedules**: **linear, quadratic, cosine**  
-- Compare **predictors**: **noise, x₀, mean**  
+- Train with different beta **schedules**: **linear, quadratic, cosine**   (with noise predictor)
+- Compare **predictors**: **noise, x₀, mean**  (with linear schedule)
 - Evaluate with FID score
 
 🚀 Usage (Task 2)
