@@ -28,10 +28,17 @@ def main(args):
     """config"""
     config = DotMap()
     config.update(vars(args))
-    config.device = f"cuda:{args.gpu}"
+    if torch.cuda.is_available():
+        config.device = f"cuda:{args.gpu}"
+    elif torch.backends.mps.is_available():
+        config.device = "mps"
+    else:
+        config.device = "cpu"
     
     now = get_current_time()
-    if args.use_cfg:
+    if args.resume_dir is not None:
+        save_dir = Path(args.resume_dir)
+    elif args.use_cfg:
         save_dir = Path(
             f"results/cfg_predictor_{args.predictor}/beta_{config.mode}/{now}"
         )
@@ -91,10 +98,22 @@ def main(args):
 
     step = 0
     losses = []
+    resumed_step = -1
+    if args.resume_dir is not None and (save_dir / "last.ckpt").exists():
+        ddpm.load(f"{save_dir}/last.ckpt")
+        ddpm = ddpm.to(config.device)
+        if (save_dir / "train_state.pt").exists():
+            state = torch.load(save_dir / "train_state.pt", map_location=config.device, weights_only=False)
+            step = state["step"]
+            resumed_step = step
+            losses = state["losses"]
+            optimizer.load_state_dict(state["optimizer"])
+            scheduler.load_state_dict(state["scheduler"])
+        print(f"Resumed training from {save_dir} at step {step}")
     
     with tqdm(initial=step, total=config.train_num_steps) as pbar:
         while step < config.train_num_steps:
-            if step % config.log_interval == 0:
+            if step % config.log_interval == 0 and step != resumed_step:
                 ddpm.eval()
                 
                 plt.plot(losses)
@@ -111,6 +130,12 @@ def main(args):
                 save_traj_strip(save_dir / f"step={step}-traj.png", traj, num_frames=10, pad=4)                            
                             
                 ddpm.save(f"{save_dir}/last.ckpt")
+                torch.save({
+                    "step": step,
+                    "losses": losses,
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                }, f"{save_dir}/train_state.pt")
                 ddpm.train()
 
             img, label = next(train_it)
@@ -139,6 +164,12 @@ def main(args):
     plt.savefig(f"{save_dir}/loss.png")
     plt.close()
     ddpm.save(f"{save_dir}/last.ckpt")
+    torch.save({
+        "step": step,
+        "losses": losses,
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+    }, f"{save_dir}/train_state.pt")
     print(f"Saved the final checkpoint at step {step} to {save_dir}/last.ckpt")
 
 
@@ -179,9 +210,10 @@ if __name__ == "__main__":
     parser.add_argument("--mode", type=str, default="linear",
                         choices=["linear", "cosine", "quad"],
                         help="beta scheduling mode")
+    parser.add_argument("--resume_dir", type=str, default=None,
+                        help="path to existing save_dir to resume training from")
     
     args = parser.parse_args()
     config = DotMap()
     config.update(vars(args))
     main(args)
-    
